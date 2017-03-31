@@ -5,13 +5,11 @@ Launch Jupyter Notebook within a Docker notebook image and
 automatically open up the URL within the default web browser.
 """
 
-# Author: Xiangmin Jiao <xiangmin.jiao@stonybrook.edu>
+# Author: Xiangmin Jiao <xmjiao@gmail.com>
 
 from __future__ import print_function # Only Python 2.x
 
 import argparse
-import random
-import string
 import sys
 
 # Process command-line arguments
@@ -19,12 +17,11 @@ parser = argparse.ArgumentParser(description=__doc__)
 
 parser.add_argument('-u', "--user", help='''username used by the image. The default is compdatasci.''', default="compdatasci")
 
-parser.add_argument('-i', '--image', help='''The Docker image to use The default is scipy-notebook.''', default="scipy-notebook")
+parser.add_argument('-i', '--image', help='''The Docker image to use. The default is scipy-jupyter.''', default="scipy-jupyter")
 
-parser.add_argument('-n', '--no-pull', help='''Do not pull the latest Docker image from the server. The default is to pull.''', dest='pull', action='store_false')
+parser.add_argument('-p', '--pull', help='''Pull the latest Docker image from the server. The default is not to pull.''', dest='pull', action='store_true')
 
-parser.set_defaults(pull=True)
-
+parser.set_defaults(pull=False)
 
 parser.add_argument('notebook', nargs='?', help='''The notebook to open.''', default="")
 
@@ -46,6 +43,14 @@ def random_ports(port, n):
         yield port + i
     for i in range(n-5):
         yield max(1, port + random.randint(-2*n, 2*n))
+
+def id_generator(size=6):
+   """Generate a container ID"""
+   import random
+   import string
+
+   chars=string.ascii_uppercase + string.digits
+   return "desktop_" + (''.join(random.choice(chars) for _ in range(size)))
 
 def find_free_port(port, retries):
    "Find a free port"
@@ -71,27 +76,28 @@ if __name__ == "__main__":
 
    pwd = os.getcwd()
 
-   if pull:
+   if pull or not subprocess.check_output(['docker', 'images', '-q', user +"/" + image]):
        subprocess.call(["docker", "pull", user +"/" + image])
 
-   # Find an unused port
+   # Generate a container ID and find an unused port
+   container = id_generator()
    port = str(find_free_port(8888, 50))
 
    # Start the docker image and pipe the stderr
-   p = subprocess.Popen(["docker", "run", "--rm",
+   p = subprocess.Popen(["docker", "run", "--rm", "--name", container,
                          "-w", "/home/" + user + "/shared", 
                          "-v", pwd + ":/home/" + user + "/shared", 
                          "-p", "127.0.0.1:" + port + ":" + port, 
-                         user +"/" + image, 
+                         user + "/" + image, 
                          "jupyter-notebook --no-browser --ip=0.0.0.0 --port " + port], 
-                        stderr=subprocess.PIPE, universal_newlines=True)
+                         stderr=subprocess.PIPE, universal_newlines=True)
    
    # Wait for user to press Ctrl-C
    try:
       opened = False
       # Monitor the stderr to extract the URL
       for stderr_line in iter(p.stderr.readline, ""):
-         if stderr_line.find("Use Control-C to stop this server") < 0:
+         if stderr_line.find("Press Control-C to stop this server") < 0:
              sys.stderr.write(stderr_line)
 
          ind = stderr_line.find("http://0.0.0.0:")
@@ -104,12 +110,11 @@ if __name__ == "__main__":
                 webbrowser.open("http://localhost:" + port + "/notebooks/" + notebook + 
                                 stderr_line[stderr_line.find("?token="):])
             opened = True
-            sys.stderr.write("*** Use Control-C to stop this server.\n")
+            print("*** Press Control-C to stop this server.")
 
       p.stderr.close()
       p.wait()
    except KeyboardInterrupt:
-       sys.stderr.write("*** Stopping the server...\n")
-       p.wait()
+       print('*** Stopping the server.')
    except OSError:
        pass
